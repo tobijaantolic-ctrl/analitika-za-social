@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>Social Analytics</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+{% macro metric_block(metric, label) %}
+<div class="metric-item">
+  <span class="metric-label">{{ label }}</span>
+  {% if metric.value is not none %}
+    <div class="metric-value-row">
+      <span class="metric-value">{{ metric.fmt }}</span>
+      {% if metric.sparkline %}
+      <span class="sparkline" title="Trend (zadnjih 30 meritev)">{{ metric.sparkline|safe }}</span>
+      {% endif %}
+    </div>
+    <div class="metric-deltas">
+      {% if metric.delta_7d_fmt %}
+      <span class="delta {% if metric.delta_7d >= 0 %}pos{% else %}neg{% endif %}">
+        {{ metric.delta_7d_fmt }}{% if metric.pct_7d_fmt %} <span class="pct-badge">{{ metric.pct_7d_fmt }}</span>{% endif %} <small>7d</small>
+      </span>
+      {% else %}
+      <span class="delta na"><small>7d —</small></span>
+      {% endif %}
+      {% if metric.delta_30d_fmt %}
+      <span class="delta {% if metric.delta_30d >= 0 %}pos{% else %}neg{% endif %}">
+        {{ metric.delta_30d_fmt }}{% if metric.pct_30d_fmt %} <span class="pct-badge">{{ metric.pct_30d_fmt }}</span>{% endif %} <small>30d</small>
+      </span>
+      {% else %}
+      <span class="delta na"><small>30d —</small></span>
+      {% endif %}
+    </div>
+  {% else %}
+    <span class="metric-value na">–</span>
+  {% endif %}
+</div>
+{% endmacro %}
+
+<header>
+  <div class="header-inner">
+    <h1>Social Analytics</h1>
+    <div class="header-actions">
+      <button class="btn btn-refresh" onclick="refreshAll(this)">↻ Osveži vse</button>
+      <a href="/transcripts" class="btn">Transkripti</a>
+      <a href="/setup" class="btn btn-setup">⚙ Setup</a>
+    </div>
+  </div>
+</header>
+
+{% if not clients %}
+<div class="empty-state">
+  <p>Ni nobene stranke. <a href="/setup">Dodaj stranko na Setup strani.</a></p>
+</div>
+{% else %}
+
+<nav class="tabs">
+  {% for client in clients %}
+  <button class="tab-btn {% if loop.first %}active{% endif %}"
+          onclick="switchTab('client-{{ client.id }}', this)">
+    {{ client.name }}
+  </button>
+  {% endfor %}
+</nav>
+
+{% for client in clients %}
+<div id="client-{{ client.id }}" class="tab-panel {% if loop.first %}active{% endif %}">
+
+  <div class="panel-header">
+    <div class="panel-left panel-heading">
+      <h2>{{ client.name }}</h2>
+      <span class="client-total">{{ client.account_count }} platforme · rezultati so prikazani ločeno</span>
+      <span class="data-source-note">Javni podatki brez prijave</span>
+    </div>
+    <div class="panel-controls">
+      <nav class="period-picker" aria-label="Časovno obdobje">
+        <a href="/?days=7&content={{ content_scope }}" class="{% if days == 7 %}active{% endif %}">7 dni</a>
+        <a href="/?days=30&content={{ content_scope }}" class="{% if days == 30 %}active{% endif %}">30 dni</a>
+        <a href="/?days=0&content={{ content_scope }}" class="{% if days == 0 %}active{% endif %}">Vsi zajeti</a>
+      </nav>
+      <nav class="period-picker content-picker" aria-label="Tip vsebine">
+        <a href="/?days={{ days }}&content=video" class="{% if content_scope == 'video' %}active{% endif %}">Reeli / videi</a>
+        <a href="/?days={{ days }}&content=all" class="{% if content_scope == 'all' %}active{% endif %}">Vse objave</a>
+      </nav>
+      <a class="btn btn-sm" href="/export.csv?days={{ days }}&content={{ content_scope }}">Izvozi CSV</a>
+      <button class="btn btn-sm" onclick="refreshClient({{ client.id }}, this)">↻ Osveži stranko</button>
+    </div>
+  </div>
+
+  {% if not client.accounts %}
+  <div class="empty-state">
+    <p>Ni dodanih računov za to stranko. <a href="/setup">Pojdi na Setup.</a></p>
+  </div>
+  {% else %}
+
+  <div class="accounts-grid">
+    {% for acc in client.accounts %}
+    <div class="account-card platform-{{ acc.platform }} {% if acc.posts_list %}has-posts{% endif %}">
+
+      <div class="card-header">
+        <span class="platform-badge">
+          <span class="platform-icon">{{ acc.platform_icon }}</span>
+          {{ acc.platform_label }}
+        </span>
+        <span class="handle">{{ acc.handle.lstrip('@') if not acc.handle.startswith('http') else acc.handle.split('/')[-2] if acc.handle.endswith('/') else acc.handle.split('/')[-1] }}</span>
+        <span class="source-pill">javni vir</span>
+      </div>
+
+      {% if acc.error %}
+      <div class="card-error">⚠ {{ acc.error }}</div>
+      {% else %}
+
+      <div class="metrics">
+        {% if acc.platform == 'youtube' %}
+          {{ metric_block(acc.followers, 'Naročniki') }}
+          {{ metric_block(acc.views, 'Skupni ogledi') }}
+          {{ metric_block(acc.posts, 'Videi') }}
+        {% elif acc.platform == 'instagram' %}
+          {{ metric_block(acc.followers, 'Sledilci') }}
+          {{ metric_block(acc.likes, 'Všečki (zad. 12)') }}
+          {{ metric_block(acc.posts, 'Objave skupaj') }}
+        {% elif acc.platform == 'facebook' %}
+          {{ metric_block(acc.followers, 'Sledilci') }}
+          {{ metric_block(acc.likes, 'Všečki strani') }}
+          <p class="metric-note">Ogledi posameznih Reelov brez prijave niso zanesljivo javno vidni.</p>
+        {% elif acc.platform == 'tiktok' %}
+          {{ metric_block(acc.followers, 'Sledilci') }}
+          {{ metric_block(acc.likes, 'Skupni všečki') }}
+          {{ metric_block(acc.posts, 'Videi') }}
+        {% endif %}
+      </div>
+
+      <div class="period-summary" aria-label="{{ period_label }} za {{ acc.platform_label }}">
+        <div class="period-summary-title">{{ period_label }} · {{ content_label }}</div>
+        <div class="period-stats">
+          <div><strong>{{ acc.period.count }}</strong><small>objav</small></div>
+          <div><strong>{{ acc.period.views_fmt if acc.period.views_fmt else '—' }}</strong><small>ogledov</small></div>
+          <div><strong>{{ acc.period.likes_fmt if acc.period.likes_fmt else '—' }}</strong><small>{{ 'reakcij' if acc.platform == 'facebook' else 'všečkov' }}</small></div>
+          <div><strong>{{ acc.period.engagement_fmt if acc.period.engagement_fmt else '—' }}</strong><small>všečki / ogledi</small></div>
+        </div>
+        <p class="coverage-note">Javno zajeto: ogledi {{ acc.period.views_coverage }}/{{ acc.period.count }}, {{ 'reakcije' if acc.platform == 'facebook' else 'všečki' }} {{ acc.period.likes_coverage }}/{{ acc.period.count }}.</p>
+      </div>
+
+      {% if acc.posts_list %}
+      <div class="posts-section">
+        <button class="posts-toggle" onclick="togglePosts('posts-{{ acc.id }}', this)">
+          {% if acc.last_post_date %}Zadnja {{ acc.last_post_date }} · {% endif %}{{ acc.posts_list|length }} objav v obdobju ▴
+        </button>
+        <div class="post-tools">
+          <input type="search" placeholder="Išči objavo" aria-label="Išči objavo"
+                 oninput="filterPosts('posts-{{ acc.id }}', this.value)">
+          <select aria-label="Razvrsti objave" onchange="sortPosts('posts-{{ acc.id }}', this.value)">
+            <option value="date">Najnovejše</option>
+            <option value="views">Največ ogledov</option>
+            <option value="likes">Največ všečkov</option>
+          </select>
+        </div>
+        <div id="posts-{{ acc.id }}" class="posts-list">
+
+          {% if acc.platform == 'instagram' %}
+          {% for post in acc.posts_list %}
+          <a href="{{ post.url }}" target="_blank" class="post-row"
+             data-date="{{ post.timestamp or 0 }}" data-views="{{ post.views if post.views is not none else -1 }}"
+             data-likes="{{ post.likes if post.likes is not none else -1 }}">
+            <div class="post-thumb">
+              {% if post.thumbnail %}
+              <img src="/img_proxy?url={{ post.thumbnail | urlencode }}" alt="" loading="lazy"
+                   onerror="this.style.display='none'">
+              {% endif %}
+              {% if post.is_video %}
+              <span class="post-type-badge reel">Reel</span>
+              {% elif post.typename == 'GraphSidecar' %}
+              <span class="post-type-badge carousel">Album</span>
+              {% else %}
+              <span class="post-type-badge photo">Foto</span>
+              {% endif %}
+            </div>
+            <div class="post-meta">
+              <span class="post-date">{{ post.date }}</span>
+              {% if post.caption %}<span class="post-caption">{{ post.caption }}</span>{% endif %}
+            </div>
+            <div class="post-stats">
+              {% if post.views is not none %}
+              <span class="post-stat views-stat" title="Ogledi"><span class="stat-icon">▶</span> {{ post.views_fmt }}</span>
+              {% endif %}
+              {% if post.likes is not none %}
+              <span class="post-stat likes-stat" title="Všečki"><span class="stat-icon">♥</span> {{ post.likes_fmt }}</span>
+              {% endif %}
+            </div>
+          </a>
+          {% endfor %}
+
+          {% elif acc.platform == 'tiktok' %}
+          {% for post in acc.posts_list %}
+          <a href="{{ post.url }}" target="_blank" class="post-row"
+             data-date="{{ post.timestamp or 0 }}" data-views="{{ post.views if post.views is not none else -1 }}"
+             data-likes="{{ post.likes if post.likes is not none else -1 }}">
+            <div class="post-thumb">
+              {% if post.thumbnail %}
+              <img src="/img_proxy?url={{ post.thumbnail | urlencode }}" alt="" loading="lazy"
+                   onerror="this.style.display='none'">
+              {% endif %}
+              <span class="post-type-badge reel">Video</span>
+            </div>
+            <div class="post-meta">
+              <span class="post-date">{{ post.date }}</span>
+              {% if post.title %}<span class="post-caption">{{ post.title }}</span>{% endif %}
+              {% if post.transcript %}
+              <span class="post-transcript" title="{{ post.transcript }}">Prepis: {{ post.transcript }}</span>
+              {% endif %}
+            </div>
+            <div class="post-stats">
+              {% if post.views is not none %}
+              <span class="post-stat views-stat" title="Ogledi"><span class="stat-icon">▶</span> {{ post.views_fmt }}</span>
+              {% endif %}
+              {% if post.likes is not none %}
+              <span class="post-stat likes-stat" title="Všečki"><span class="stat-icon">♥</span> {{ post.likes_fmt }}</span>
+              {% endif %}
+            </div>
+          </a>
+          {% endfor %}
+
+          {% elif acc.platform == 'facebook' %}
+          {% for post in acc.posts_list %}
+          <a href="{{ post.url }}" target="_blank" class="post-row post-row--fb"
+             data-date="{{ post.timestamp or 0 }}" data-views="-1"
+             data-likes="{{ post.likes if post.likes is not none else -1 }}">
+            <div class="post-thumb">
+              <span class="post-type-badge {% if post.type == 'reel' %}reel{% elif post.type == 'video' %}reel{% else %}photo{% endif %}">
+                {{ 'Reel' if post.type == 'reel' else ('Video' if post.type == 'video' else 'Objava') }}
+              </span>
+            </div>
+            <div class="post-meta">
+              <span class="post-date">{{ post.date if post.date else '—' }}</span>
+              <span class="post-caption">{{ post.url.split('facebook.com/')[-1].split('?')[0][:60] }}</span>
+            </div>
+            <div class="post-stats">
+              {% if post.likes is not none %}
+              <span class="post-stat likes-stat" title="Reakcije"><span class="stat-icon">♥</span> {{ post.likes_fmt }}</span>
+              {% else %}
+              <span class="post-stat unavailable-stat">Števec ni vrnjen</span>
+              {% endif %}
+            </div>
+          </a>
+          {% endfor %}
+          {% endif %}
+
+        </div>
+      </div>
+      {% elif acc.known_posts_count %}
+      <div class="period-empty">V tem obdobju ni zajetih posameznih objav. Izberi daljše obdobje.</div>
+      {% endif %}
+
+      {% endif %}
+
+      <div class="card-footer">
+        {% if acc.last_update %}
+        <span class="last-update{% if acc.is_stale %} stale{% endif %}" title="{{ acc.last_update }}">
+          {% if acc.is_stale %}⚠ {% endif %}{{ acc.time_ago or acc.last_update }}
+        </span>
+        {% else %}
+        <span class="last-update no-data">Ni podatkov</span>
+        {% endif %}
+        <div class="card-actions">
+          {% if acc.platform == 'tiktok' %}
+          <button class="btn btn-xs" onclick="refreshAccount({{ acc.id }}, this, true)">Poišči nove videe</button>
+          {% endif %}
+          <button class="btn btn-xs" onclick="refreshAccount({{ acc.id }}, this)">↻</button>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% endif %}
+</div>
+{% endfor %}
+
+{% endif %}
+
+<div id="spinner" class="spinner-overlay" style="display:none">
+  <div class="spinner-box">
+    <div class="spinner"></div>
+    <p id="spinner-msg">Osveževanje...</p>
+  </div>
+</div>
+
+<div id="toast" class="toast" style="display:none"></div>
+
+<script>
+function switchTab(id, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  btn.classList.add('active');
+}
+
+function togglePosts(id, btn) {
+  const el = document.getElementById(id);
+  const willShow = el.classList.contains('posts-list--hidden');
+  el.classList.toggle('posts-list--hidden');
+  btn.textContent = willShow
+    ? btn.textContent.replace('▾', '▴')
+    : btn.textContent.replace('▴', '▾');
+}
+
+function filterPosts(id, query) {
+  const needle = query.trim().toLowerCase();
+  document.getElementById(id).querySelectorAll('.post-row').forEach(row => {
+    row.hidden = needle !== '' && !row.textContent.toLowerCase().includes(needle);
+  });
+}
+
+function sortPosts(id, key) {
+  const list = document.getElementById(id);
+  Array.from(list.querySelectorAll('.post-row'))
+    .sort((left, right) => Number(right.dataset[key]) - Number(left.dataset[key]))
+    .forEach(row => list.appendChild(row));
+}
+
+function showSpinner(msg) {
+  document.getElementById('spinner-msg').textContent = msg || 'Osveževanje...';
+  document.getElementById('spinner').style.display = 'flex';
+}
+function hideSpinner() { document.getElementById('spinner').style.display = 'none'; }
+
+function showToast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast' + (type ? ' ' + type : '');
+  el.style.display = 'block';
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => { el.style.display = 'none'; }, 5000);
+}
+
+async function doRefresh(payload, msg) {
+  showSpinner(msg);
+  const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+  try {
+    const r = await fetch('/refresh_ajax', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+      body: JSON.stringify(payload)
+    });
+    const data = await r.json();
+    if (data.errors && data.errors.length) {
+      sessionStorage.setItem('pendingErrors', JSON.stringify(data.errors));
+    }
+  } catch(e) {
+    sessionStorage.setItem('pendingErrors', JSON.stringify([String(e)]));
+  } finally {
+    hideSpinner();
+    window.location.reload();
+  }
+}
+
+function refreshAll() { doRefresh({all: true}, 'Osveževanje vseh računov...'); }
+function refreshClient(id) { doRefresh({client_id: id}, 'Osveževanje stranke...'); }
+function refreshAccount(id, btn, discoverNew=false) {
+  doRefresh(
+    {account_id: id, discover_new: discoverNew},
+    discoverNew ? 'Iskanje novih TikTok videov...' : 'Osveževanje računa...'
+  );
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const errs = sessionStorage.getItem('pendingErrors');
+  if (errs) {
+    sessionStorage.removeItem('pendingErrors');
+    try {
+      const list = JSON.parse(errs);
+      if (list && list.length) showToast('⚠ ' + list.slice(0, 2).join(' · '), 'error');
+    } catch(_) {}
+  }
+});
+</script>
+
+</body>
+</html>

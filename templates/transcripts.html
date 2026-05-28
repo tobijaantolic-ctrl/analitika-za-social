@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
+  <title>TikTok prepisi - Social Analytics</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <h1>TikTok prepisi</h1>
+    <div class="header-actions">
+      <a href="/" class="btn">Nazaj na pregled</a>
+    </div>
+  </div>
+</header>
+
+<main class="transcripts-container">
+  <h2>TikTok videi - javne objave</h2>
+  <p class="transcript-summary">
+    Prikazani so samo konkretni TikTok videi iz izbranih profilov.
+    Prepisi skupaj: <strong>{{ completed_count }} / {{ tiktok_video_count }}</strong>.
+    Ogledi in všečki so zajeti neposredno pri posamezni javni objavi.
+  </p>
+  <section class="transcript-exports" aria-label="Izvoz prepisov po stranki">
+    <h3>Izvoz po stranki</h3>
+    {% for client in transcript_clients %}
+    <div class="transcript-export-client">
+      <div>
+        <strong>{{ client.name }}</strong>
+        <span>{{ client.completed_count }} / {{ client.video_count }} video prepisov</span>
+      </div>
+      <div class="transcript-export-actions">
+        <button
+          type="button"
+          class="btn btn-sm copy-client-transcripts"
+          data-export-url="{{ url_for('export_client_transcripts', client_id=client.id) }}"
+        >Kopiraj vse prepise</button>
+        <a class="btn btn-primary btn-sm" href="{{ url_for('export_client_transcripts', client_id=client.id) }}">Shrani .md</a>
+      </div>
+      <span class="copy-status" aria-live="polite"></span>
+    </div>
+    {% endfor %}
+  </section>
+  <div class="transcript-profiles" aria-label="Stanje prepisov po profilu">
+    {% for account in tiktok_accounts %}
+    <div class="transcript-profile">
+      <strong>{{ account.handle }}</strong>
+      <span>{{ account.completed_count }} / {{ account.video_count }} prepisov</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% if notice %}<p class="transcript-alert success">{{ notice }}</p>{% endif %}
+  {% if error %}<p class="transcript-alert error">{{ error }}</p>{% endif %}
+  <div class="transcript-toolbar">
+    <input type="search" id="transcript-search" placeholder="Išči profil, naslov ali datum TikToka">
+    <span>Nepovezane lokalne montažne datoteke niso vključene.</span>
+  </div>
+
+  <div class="transcript-list tiktok-transcript-list" id="tiktok-transcripts">
+    {% for item in tiktok_rows %}
+    <article class="transcript-card tiktok-transcript-card" data-search="{{ item.handle }} {{ item.title }} {{ item.date }}">
+      <div class="transcript-card-header">
+        <div>
+          <span class="transcript-handle">{{ item.handle }}</span>
+          <h3>{{ item.title }}</h3>
+        </div>
+        <a href="{{ item.video_url }}" class="btn btn-sm" target="_blank">Odpri TikTok</a>
+      </div>
+      <p class="transcript-meta">
+        {% if item.status == "complete" %}
+        <span class="status-complete">prepisano</span>
+        {% elif item.status == "no_audio" %}
+        <span class="status-no_audio">brez zvoka</span>
+        {% else %}
+        <span class="status-missing">manjka prepis</span>
+        {% endif %}
+        {% if item.date %} · {{ item.date }}{% endif %}
+        {% if item.views_fmt %} · <strong>{{ item.views_fmt }}</strong> ogledov{% endif %}
+        {% if item.likes_fmt %} · <strong>{{ item.likes_fmt }}</strong> všečkov{% endif %}
+        {% if item.source_label %} · {{ item.source_label }}{% endif %}
+      </p>
+      {% if item.transcript %}
+      <p class="transcript-body">{{ item.transcript }}</p>
+      {% elif item.status == "no_audio" %}
+      <p class="transcript-body">{{ item.error }}</p>
+      {% else %}
+      <button
+        type="button"
+        class="btn btn-primary btn-sm transcript-upload-trigger"
+        data-account-id="{{ item.account_id }}"
+        data-video-url="{{ item.video_url }}"
+        data-title="{{ item.title }}"
+      >Naloži video in prepiši</button>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </div>
+</main>
+<section class="transcript-copy-panel" id="transcript-copy-panel" hidden>
+  <div class="transcript-copy-dialog">
+    <h3>Prepisi pripravljeni za kopiranje</h3>
+    <p>Besedilo je izbrano. Pritisni <strong>Cmd+C</strong> oziroma <strong>Ctrl+C</strong>.</p>
+    <textarea id="transcript-copy-text" readonly></textarea>
+    <div class="transcript-upload-actions">
+      <button type="button" class="btn btn-primary btn-sm" id="select-copy-text">Izberi vse</button>
+      <button type="button" class="btn btn-sm" id="close-copy-panel">Zapri</button>
+    </div>
+  </div>
+</section>
+<section class="transcript-upload-panel" id="transcript-upload-panel" hidden>
+  <form class="transcript-upload" action="/transcripts/upload" method="post" enctype="multipart/form-data">
+    <h3>Naloži TikTok video</h3>
+    <p id="selected-tiktok-title"></p>
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="account_id" id="selected-account-id">
+    <input type="hidden" name="video_url" id="selected-video-url">
+    <label>
+      <span>Izberi shranjeno datoteko te objave:</span>
+      <input type="file" name="video_file" accept=".mp4,.mov,.m4v,.webm,.m4a" required>
+    </label>
+    <div class="transcript-upload-actions">
+      <button type="submit" class="btn btn-primary btn-sm">Naloži in prepiši</button>
+      <button type="button" class="btn btn-sm" id="close-upload">Prekliči</button>
+    </div>
+  </form>
+</section>
+<script>
+  const search = document.getElementById('transcript-search');
+  const cards = Array.from(document.querySelectorAll('.tiktok-transcript-card'));
+  const copyPanel = document.getElementById('transcript-copy-panel');
+  const copyText = document.getElementById('transcript-copy-text');
+  search.addEventListener('input', () => {
+    const term = search.value.toLowerCase().trim();
+    cards.forEach(card => {
+      card.hidden = term && !card.dataset.search.toLowerCase().includes(term);
+    });
+  });
+  document.querySelectorAll('.copy-client-transcripts').forEach(button => {
+    button.addEventListener('click', async () => {
+      const status = button.closest('.transcript-export-client').querySelector('.copy-status');
+      status.textContent = 'Pripravljam besedilo...';
+      try {
+        const response = await fetch(button.dataset.exportUrl);
+        if (!response.ok) throw new Error('Izvoz ni na voljo.');
+        const text = await response.text();
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch (clipboardError) {
+          const fallback = document.createElement('textarea');
+          fallback.value = text;
+          fallback.setAttribute('readonly', '');
+          fallback.style.position = 'fixed';
+          fallback.style.opacity = '0';
+          document.body.appendChild(fallback);
+          fallback.select();
+          const copied = document.execCommand('copy');
+          fallback.remove();
+          if (!copied) {
+            copyText.value = text;
+            copyPanel.hidden = false;
+            copyText.focus();
+            copyText.select();
+            status.textContent = 'Besedilo je pripravljeno za kopiranje.';
+            return;
+          }
+        }
+        status.textContent = 'Vsi prepisi so kopirani.';
+      } catch (error) {
+        status.textContent = 'Kopiranje ni uspelo; uporabi Shrani .md.';
+      }
+    });
+  });
+  document.getElementById('select-copy-text').addEventListener('click', () => {
+    copyText.focus();
+    copyText.select();
+  });
+  document.getElementById('close-copy-panel').addEventListener('click', () => {
+    copyPanel.hidden = true;
+  });
+  const uploadPanel = document.getElementById('transcript-upload-panel');
+  const selectedTitle = document.getElementById('selected-tiktok-title');
+  const selectedAccount = document.getElementById('selected-account-id');
+  const selectedUrl = document.getElementById('selected-video-url');
+  document.querySelectorAll('.transcript-upload-trigger').forEach(button => {
+    button.addEventListener('click', () => {
+      selectedTitle.textContent = button.dataset.title;
+      selectedAccount.value = button.dataset.accountId;
+      selectedUrl.value = button.dataset.videoUrl;
+      uploadPanel.hidden = false;
+      uploadPanel.querySelector('input[type="file"]').focus();
+    });
+  });
+  document.getElementById('close-upload').addEventListener('click', () => {
+    uploadPanel.hidden = true;
+  });
+</script>
+</body>
+</html>

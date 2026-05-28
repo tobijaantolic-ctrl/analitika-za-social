@@ -1,0 +1,13 @@
+services:
+  analytics-dashboard:
+    build: .
+    ports:
+      - "5455:5455"
+    env_file:
+      - .env
+    volumes:
+      - analytics_data:/data
+    restart: unless-stopped
+
+volumes:
+  analytics_data:

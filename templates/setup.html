@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="sl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Setup — Social Analytics</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <h1>⚙ Setup</h1>
+    <a href="/" class="btn btn-setup">← Dashboard</a>
+  </div>
+</header>
+
+<div class="setup-container">
+
+  <!-- Platform info -->
+  <section class="setup-section">
+    <h2>Platforme — brez loginov</h2>
+    <div class="platform-info-grid">
+      <div class="platform-info-card">
+        <span class="platform-tag platform-instagram">Instagram</span>
+        <p>Uradni nejavni API — sledilci + všečki zadnjih 12 objav. Samo javni profili.</p>
+      </div>
+      <div class="platform-info-card">
+        <span class="platform-tag platform-facebook">Facebook</span>
+        <p>Playwright scraping — všečki strani + sledilci. Samo javne strani.</p>
+      </div>
+      <div class="platform-info-card">
+        <span class="platform-tag platform-tiktok">TikTok</span>
+        <p>Playwright scraping — sledilci + skupni všečki. Samo javni profili.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Stranke -->
+  <section class="setup-section">
+    <h2>Stranke</h2>
+
+    {% for client in clients %}
+    <div class="client-block">
+      <div class="client-header">
+        <form method="POST" action="/setup/client" class="inline-form">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="client_id" value="{{ client.id }}">
+          <input type="text" name="name" value="{{ client.name }}" class="input-name">
+          <button type="submit" class="btn btn-sm">Shrani ime</button>
+        </form>
+        <form method="POST" action="/setup/client/delete"
+              onsubmit="return confirm('Izbriši stranko {{ client.name }} in vse njene račune?')">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="client_id" value="{{ client.id }}">
+          <button type="submit" class="btn btn-danger btn-sm">✕ Izbriši</button>
+        </form>
+      </div>
+
+      <!-- Obstoječi računi -->
+      {% set accounts = accounts_by_client.get(client.id, []) %}
+      {% if accounts %}
+      <table class="accounts-table">
+        <thead>
+          <tr>
+            <th>Platforma</th>
+            <th>Handle / URL</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for acc in accounts %}
+          <tr>
+            <td><span class="platform-tag platform-{{ acc.platform }}">{{ platform_labels[acc.platform] }}</span></td>
+            <td>{{ acc.handle }}</td>
+            <td>
+              <button class="btn btn-xs" onclick="toggleEdit('edit-{{ acc.id }}')">Uredi</button>
+              <form method="POST" action="/setup/account/delete" style="display:inline"
+                    onsubmit="return confirm('Izbriši ta račun?')">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="account_id" value="{{ acc.id }}">
+                <button type="submit" class="btn btn-danger btn-xs">✕</button>
+              </form>
+            </td>
+          </tr>
+          <tr id="edit-{{ acc.id }}" class="edit-row" style="display:none">
+            <td colspan="3">
+              <form method="POST" action="/setup/account" class="account-form">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="account_id" value="{{ acc.id }}">
+                <input type="hidden" name="client_id" value="{{ client.id }}">
+                <div class="form-row">
+                  <select name="platform">
+                    {% for p in platforms %}
+                    <option value="{{ p }}" {% if p == acc.platform %}selected{% endif %}>
+                      {{ platform_labels[p] }}
+                    </option>
+                    {% endfor %}
+                  </select>
+                  <input type="text" name="handle" value="{{ acc.handle }}" placeholder="@username ali URL" required>
+                </div>
+                <button type="submit" class="btn btn-sm">Shrani spremembe</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      <!-- Dodaj nov račun -->
+      <details class="add-account-details">
+        <summary class="btn btn-sm btn-add">+ Dodaj račun</summary>
+        <form method="POST" action="/setup/account" class="account-form">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="client_id" value="{{ client.id }}">
+          <div class="form-row">
+            <select name="platform">
+              {% for p in platforms %}
+              <option value="{{ p }}">{{ platform_labels[p] }}</option>
+              {% endfor %}
+            </select>
+            <input type="text" name="handle" placeholder="@username ali polni URL" required>
+          </div>
+          <button type="submit" class="btn btn-sm">Dodaj</button>
+        </form>
+      </details>
+
+    </div>
+    {% endfor %}
+
+    <!-- Nova stranka -->
+    <form method="POST" action="/setup/client" class="new-client-form">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <input type="text" name="name" placeholder="Ime nove stranke..." class="input-name">
+      <button type="submit" class="btn">+ Dodaj stranko</button>
+    </form>
+  </section>
+
+</div>
+
+<script>
+function toggleEdit(id) {
+  const row = document.getElementById(id);
+  row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Local databases and data
+analytics.db
+*.db
+*.sqlite
+*.sqlite3
+uploads/
+logs/
+*.log
+
+# macOS / local desktop app runtime
+.DS_Store
+macos/
+*.app/
+*.plist.bak
+
+# Generated artifacts
+artifacts/
+build/
+dist/
+*.egg-info/
+.cache/
+tmp/
+temp/
+
+# Large media / generated files
+*.mp4
+*.mov
+*.m4v
+*.webm
+*.mp3
+*.wav
+*.m4a
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo

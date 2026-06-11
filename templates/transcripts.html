@@ -24,6 +24,13 @@
     Prepisi skupaj: <strong>{{ completed_count }} / {{ tiktok_video_count }}</strong>.
     Ogledi in všečki so zajeti neposredno pri posamezni javni objavi.
   </p>
+  <div class="transcript-refresh-bar">
+    <button type="button" class="btn btn-primary" id="refresh-all-transcripts">
+      ↻ Prepiši manjkajoče (vsi profili)
+    </button>
+    <span class="transcript-refresh-help">Prenese nove videe in jih lokalno transkribira z Whisperjem. Že prepisani videi se preskočijo.</span>
+    <span id="transcript-refresh-status" class="transcript-refresh-status"></span>
+  </div>
   <section class="transcript-exports" aria-label="Izvoz prepisov po stranki">
     <h3>Izvoz po stranki</h3>
     {% for client in transcript_clients %}
@@ -49,19 +56,43 @@
     <div class="transcript-profile">
       <strong>{{ account.handle }}</strong>
       <span>{{ account.completed_count }} / {{ account.video_count }} prepisov</span>
+      {% set missing = account.video_count - account.completed_count %}
+      <button type="button" class="btn btn-sm refresh-profile-transcripts"
+              data-account-id="{{ account.id }}" data-handle="{{ account.handle }}"
+              {% if missing == 0 %}disabled title="Vse že prepisano"{% endif %}>
+        ↻ Prepiši {{ missing }} manjkajočih
+      </button>
     </div>
     {% endfor %}
   </div>
   {% if notice %}<p class="transcript-alert success">{{ notice }}</p>{% endif %}
   {% if error %}<p class="transcript-alert error">{{ error }}</p>{% endif %}
   <div class="transcript-toolbar">
-    <input type="search" id="transcript-search" placeholder="Išči profil, naslov ali datum TikToka">
-    <span>Nepovezane lokalne montažne datoteke niso vključene.</span>
+    <input type="search" id="transcript-search" placeholder="Išči po naslovu, prepisu, profilu…">
+    <select id="transcript-sort" aria-label="Razvrsti">
+      <option value="views">Razvrsti: največ ogledov</option>
+      <option value="likes">Razvrsti: največ všečkov</option>
+      <option value="engagement">Razvrsti: najboljši engagement</option>
+      <option value="date">Razvrsti: najnovejše</option>
+    </select>
+    <select id="transcript-status-filter" aria-label="Filter po statusu">
+      <option value="all">Vsi</option>
+      <option value="complete">Samo prepisani</option>
+      <option value="missing">Brez prepisa</option>
+    </select>
+    <span id="transcript-count"></span>
   </div>
 
   <div class="transcript-list tiktok-transcript-list" id="tiktok-transcripts">
     {% for item in tiktok_rows %}
-    <article class="transcript-card tiktok-transcript-card" data-search="{{ item.handle }} {{ item.title }} {{ item.date }}">
+    {% set er = item.engagement_rate %}
+    <article class="transcript-card tiktok-transcript-card"
+             data-search="{{ item.handle }} {{ item.title }} {{ item.date }} {{ item.transcript or '' }}"
+             data-views="{{ item.views or 0 }}"
+             data-likes="{{ item.likes or 0 }}"
+             data-engagement="{{ er or 0 }}"
+             data-date="{{ item.timestamp or 0 }}"
+             data-status="{{ item.status }}">
       <div class="transcript-card-header">
         <div>
           <span class="transcript-handle">{{ item.handle }}</span>
@@ -80,6 +111,9 @@
         {% if item.date %} · {{ item.date }}{% endif %}
         {% if item.views_fmt %} · <strong>{{ item.views_fmt }}</strong> ogledov{% endif %}
         {% if item.likes_fmt %} · <strong>{{ item.likes_fmt }}</strong> všečkov{% endif %}
+        {% if er is not none %}
+         · <span class="eng-badge {% if er >= 7 %}high{% elif er >= 4 %}good{% elif er >= 2 %}ok{% else %}low{% endif %}">{{ ("%.1f" % er) | replace('.', ',') }}%</span>
+        {% endif %}
         {% if item.source_label %} · {{ item.source_label }}{% endif %}
       </p>
       {% if item.transcript %}
@@ -129,13 +163,126 @@
 </section>
 <script>
   const search = document.getElementById('transcript-search');
+  const sortSelect = document.getElementById('transcript-sort');
+  const statusFilter = document.getElementById('transcript-status-filter');
+  const countEl = document.getElementById('transcript-count');
+  const listEl = document.getElementById('tiktok-transcripts');
   const cards = Array.from(document.querySelectorAll('.tiktok-transcript-card'));
   const copyPanel = document.getElementById('transcript-copy-panel');
   const copyText = document.getElementById('transcript-copy-text');
-  search.addEventListener('input', () => {
+
+  function escapeHtml(s) {
+    return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function highlightCard(card, term) {
+    const body = card.querySelector('.transcript-body');
+    if (!body) return;
+    const original = body.dataset.original ?? body.textContent;
+    body.dataset.original = original;
+    if (!term) { body.textContent = original; return; }
+    const re = new RegExp('(' + term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+    body.innerHTML = escapeHtml(original).replace(re, '<mark>$1</mark>');
+  }
+
+  function applyFilters() {
     const term = search.value.toLowerCase().trim();
+    const status = statusFilter.value;
+    let visible = 0;
     cards.forEach(card => {
-      card.hidden = term && !card.dataset.search.toLowerCase().includes(term);
+      const matchesSearch = !term || card.dataset.search.toLowerCase().includes(term);
+      const matchesStatus = status === 'all'
+        || (status === 'complete' && card.dataset.status === 'complete')
+        || (status === 'missing' && card.dataset.status !== 'complete');
+      card.hidden = !(matchesSearch && matchesStatus);
+      if (!card.hidden) {
+        visible++;
+        highlightCard(card, term);
+      }
+    });
+    countEl.textContent = `Vidnih: ${visible} / ${cards.length}`;
+  }
+
+  function applySort() {
+    const key = sortSelect.value;
+    const sorted = [...cards].sort((a, b) => Number(b.dataset[key]) - Number(a.dataset[key]));
+    sorted.forEach(card => listEl.appendChild(card));
+  }
+
+  search.addEventListener('input', applyFilters);
+  statusFilter.addEventListener('change', applyFilters);
+  sortSelect.addEventListener('change', applySort);
+
+  applySort();
+  applyFilters();
+
+  // ── Transcription refresh ─────────────────────────────────────────
+  const csrfToken = document.querySelector('meta[name="csrf-token"]').content;
+  const statusEl = document.getElementById('transcript-refresh-status');
+  const refreshAllBtn = document.getElementById('refresh-all-transcripts');
+  let _pollTimer = null;
+
+  async function startTranscription(payload, label) {
+    statusEl.textContent = '⌛ Zaganjam ' + label + '...';
+    statusEl.className = 'transcript-refresh-status running';
+    document.querySelectorAll('.refresh-profile-transcripts, #refresh-all-transcripts').forEach(b => b.disabled = true);
+    try {
+      const r = await fetch('/transcripts/refresh', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json();
+      if (!data.ok) throw new Error(data.error || 'Job ni mogel biti ustvarjen.');
+      pollJobStatus(data.job_id, label);
+    } catch (e) {
+      statusEl.textContent = '⚠ ' + String(e.message || e);
+      statusEl.className = 'transcript-refresh-status error';
+      document.querySelectorAll('.refresh-profile-transcripts, #refresh-all-transcripts').forEach(b => b.disabled = false);
+    }
+  }
+
+  function pollJobStatus(jobId, label) {
+    if (_pollTimer) clearInterval(_pollTimer);
+    _pollTimer = setInterval(async () => {
+      try {
+        const r = await fetch('/api/jobs/active');
+        const d = await r.json();
+        const active = (d.active || []).find(j => j.id === jobId);
+        if (active) {
+          statusEl.textContent = '⟳ ' + (active.message || 'Teče...');
+          statusEl.className = 'transcript-refresh-status running';
+          return;
+        }
+        const finished = d.latest_finished;
+        if (finished && finished.id === jobId) {
+          clearInterval(_pollTimer); _pollTimer = null;
+          if (finished.status === 'succeeded') {
+            statusEl.textContent = '✓ ' + (finished.message || 'Končano.');
+            statusEl.className = 'transcript-refresh-status success';
+            setTimeout(() => window.location.reload(), 1200);
+          } else {
+            statusEl.textContent = '⚠ ' + (finished.message || 'Job ni uspel.');
+            statusEl.className = 'transcript-refresh-status error';
+            document.querySelectorAll('.refresh-profile-transcripts, #refresh-all-transcripts').forEach(b => b.disabled = false);
+          }
+        }
+      } catch (_) {}
+    }, 2500);
+  }
+
+  refreshAllBtn?.addEventListener('click', () => {
+    if (!confirm('Prenesi in transkribiraj manjkajoče TikToke za VSE profile? To lahko traja nekaj minut na video.')) return;
+    startTranscription({}, 'vsi profili');
+  });
+
+  document.querySelectorAll('.refresh-profile-transcripts').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const accountId = Number(btn.dataset.accountId);
+      const handle = btn.dataset.handle;
+      if (!accountId) return;
+      if (!confirm(`Prenesi in transkribiraj manjkajoče TikToke za ${handle}?`)) return;
+      startTranscription({account_ids: [accountId]}, handle);
     });
   });
   document.querySelectorAll('.copy-client-transcripts').forEach(button => {

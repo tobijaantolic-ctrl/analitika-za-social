@@ -65,7 +65,7 @@ class DashboardTestCase(unittest.TestCase):
         self.assertEqual(account["posts_list"][0]["views_fmt"], "21.800")
         self.assertEqual(account["posts_list"][0]["likes_fmt"], "328")
         self.assertEqual(account["posts_list"][0]["url"], "https://www.instagram.com/reel/abc123/")
-        self.assertNotIn("youtube", app.PLATFORMS)
+        self.assertIn("youtube", app.PLATFORMS)
 
     def test_refresh_keeps_existing_post_numbers_if_fetcher_has_no_list(self):
         original_posts = json.dumps([{"shortcode": "existing", "views": 5000, "likes": 42}])
@@ -74,9 +74,8 @@ class DashboardTestCase(unittest.TestCase):
         empty_list_result = {"followers": 73010, "likes": 1, "posts": 598, "posts_json": None}
         fetcher = SimpleNamespace(fetch=lambda account: empty_list_result.copy())
         with patch.object(app.importlib, "import_module", return_value=fetcher):
-            response = self.client.post("/refresh_ajax", json={"account_id": 1})
+            app.refresh_accounts([1])
 
-        self.assertEqual(response.status_code, 200)
         self.assertEqual(db.get_latest_good_snapshot(1)["posts_json"], original_posts)
 
     def test_refresh_does_not_replace_cumulative_views_with_lower_value(self):
@@ -88,9 +87,8 @@ class DashboardTestCase(unittest.TestCase):
         }
         fetcher = SimpleNamespace(fetch=lambda account: reduced.copy())
         with patch.object(app.importlib, "import_module", return_value=fetcher):
-            response = self.client.post("/refresh_ajax", json={"account_id": 1})
+            app.refresh_accounts([1])
 
-        self.assertEqual(response.status_code, 200)
         posts = json.loads(db.get_latest_good_snapshot(1)["posts_json"])
         self.assertEqual(posts[0]["views"], 88700)
         self.assertEqual(posts[0]["likes"], 972)
@@ -106,7 +104,7 @@ class DashboardTestCase(unittest.TestCase):
         }
         fetcher = SimpleNamespace(fetch=lambda account: missing_reaction.copy())
         with patch.object(app.importlib, "import_module", return_value=fetcher):
-            self.client.post("/refresh_ajax", json={"account_id": 1})
+            app.refresh_accounts([1])
 
         post = json.loads(db.get_latest_good_snapshot(1)["posts_json"])[0]
         self.assertEqual(post["likes"], 197)

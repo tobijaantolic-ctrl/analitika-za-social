@@ -6,6 +6,13 @@ from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent
 
+# Load .env for local development (no-op if file missing or dotenv unavailable).
+try:
+    from dotenv import load_dotenv
+    load_dotenv(PROJECT_DIR / ".env")
+except ImportError:  # pragma: no cover — defensive
+    pass
+
 
 def env_bool(name, default=False):
     value = os.environ.get(name)
@@ -55,3 +62,8 @@ OPENCLAW_TOKEN = os.environ.get("OPENCLAW_TOKEN", "")
 ENABLE_OPENCLAW = env_bool("ENABLE_OPENCLAW", not IS_PRODUCTION)
 
 YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
+
+FB_COOKIES_FILE = Path(
+    os.environ.get("FB_COOKIES_FILE", PROJECT_DIR / "cookies" / "facebook.txt")
+).expanduser()
+FB_COOKIES_EXPIRY_WARNING_DAYS = env_int("FB_COOKIES_EXPIRY_WARNING_DAYS", 25)

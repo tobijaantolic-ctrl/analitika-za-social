@@ -18,6 +18,7 @@ ENV/
 .env
 .env.*
 !.env.example
+cookies/
 
 # Local databases and data
 analytics.db
@@ -30,6 +31,7 @@ logs/
 
 # macOS / local desktop app runtime
 .DS_Store
+.claude/
 macos/
 *.app/
 *.plist.bak

@@ -17,10 +17,69 @@
 
 <div class="setup-container">
 
+  {% if notice %}<p class="transcript-alert success">{{ notice }}</p>{% endif %}
+  {% if error %}<p class="transcript-alert error">{{ error }}</p>{% endif %}
+
+  <!-- Facebook session cookies -->
+  <section class="setup-section">
+    <h2>Facebook session (za profile.php strani)</h2>
+    <p class="fb-cookies-help">
+      Za FB strani z URL-jem <code>profile.php?id=...</code> Page Plugin ne dela.
+      Naloži <code>cookies.txt</code> iz svojega FB računa (logiran), da odklenjemo
+      per-post podatke. Cookies pretečejo po ~30 dneh — sistem te bo opozoril.
+    </p>
+    <div class="fb-cookies-status">
+      {% if fb_cookies.exists %}
+        <div class="fb-cookies-state {{ 'warn' if fb_cookies.near_expiry else 'ok' }}">
+          <strong>
+            {% if fb_cookies.near_expiry %}⚠ Cookies stari {{ fb_cookies.age_days }} dni
+            {% else %}✓ Cookies aktivni ({{ fb_cookies.age_days }} dni stari){% endif %}
+          </strong>
+          <span>{{ fb_cookies.cookie_count }} cookie zapisov · naloženo {{ fb_cookies.modified }}</span>
+        </div>
+        <form method="POST" action="/setup/facebook_cookies/delete" style="display:inline">
+          <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+          <button type="submit" class="btn btn-danger btn-sm"
+                  onclick="return confirm('Izbriši shranjene FB cookies?')">Izbriši</button>
+        </form>
+      {% else %}
+        <div class="fb-cookies-state none">
+          <strong>Cookies niso naloženi.</strong>
+          <span>FB scraping bo dal samo follower/likes count.</span>
+        </div>
+      {% endif %}
+    </div>
+    <form method="POST" action="/setup/facebook_cookies" enctype="multipart/form-data" class="fb-cookies-upload">
+      <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+      <label>
+        <span>Naloži <code>cookies.txt</code> (Netscape format):</span>
+        <input type="file" name="cookies_file" accept=".txt" required>
+      </label>
+      <button type="submit" class="btn btn-primary btn-sm">Naloži cookies</button>
+    </form>
+    <details class="fb-cookies-howto">
+      <summary>Kako pridobim cookies.txt</summary>
+      <ol>
+        <li>Logiraj se v Facebook v Chromu kot KKO admin.</li>
+        <li>Namesti Chrome extension <strong>"Get cookies.txt LOCALLY"</strong>
+            (<a href="https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc" target="_blank">link</a>).
+        </li>
+        <li>Pojdi na <code>facebook.com</code> in klikni ikono extensiona.</li>
+        <li>Klikni <strong>Export</strong> → <strong>Netscape format</strong> → shrani <code>cookies.txt</code>.</li>
+        <li>Naloži datoteko sem zgoraj.</li>
+      </ol>
+      <p>Sistem te bo opozoril na dashboardu, ko bodo cookies starejši od {{ fb_cookies.warning_days }} dni — takrat ponovi postopek.</p>
+    </details>
+  </section>
+
   <!-- Platform info -->
   <section class="setup-section">
     <h2>Platforme — brez loginov</h2>
     <div class="platform-info-grid">
+      <div class="platform-info-card">
+        <span class="platform-tag platform-youtube">YouTube</span>
+        <p>yt-dlp scraping — naročniki + zadnjih 50 videov z ogledi/všečki. Brez API ključa.</p>
+      </div>
       <div class="platform-info-card">
         <span class="platform-tag platform-instagram">Instagram</span>
         <p>Uradni nejavni API — sledilci + všečki zadnjih 12 objav. Samo javni profili.</p>

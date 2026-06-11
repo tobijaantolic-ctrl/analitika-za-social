@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: analitika-za-social
+    runtime: docker
+    repo: https://github.com/tobijaantolic-ctrl/analitika-za-social
+    branch: main
+    plan: starter
+    region: frankfurt
+    autoDeployTrigger: commit
+    healthCheckPath: /health
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    disk:
+      name: analytics-data
+      mountPath: /data
+      sizeGB: 1
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+      - key: AUTH_REQUIRED
+        value: "true"
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
+      - key: DATABASE_URL
+        value: sqlite:////data/analytics.db
+      - key: UPLOAD_DIR
+        value: /data/uploads
+      - key: PORT
+        value: "5455"
+      - key: HOST
+        value: 0.0.0.0
+      - key: ENABLE_OPENCLAW
+        value: "false"
+      - key: TRANSCRIPTION_ENABLED
+        value: "false"
+      - key: MAX_UPLOAD_MB
+        value: "600"

@@ -4,6 +4,7 @@ import database as db
 import importlib
 import io
 import json as _json
+import os
 import re
 import secrets
 import subprocess
@@ -13,6 +14,7 @@ from pathlib import Path
 from werkzeug.security import check_password_hash
 
 import config
+import worker
 
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
@@ -26,7 +28,7 @@ TIKTOK_UPLOAD_EXTENSIONS = {".mp4", ".mov", ".m4v", ".webm", ".m4a"}
 from urllib.parse import quote as _urlquote, urlparse as _urlparse
 app.jinja_env.filters["urlencode"] = lambda s: _urlquote(str(s), safe="")
 
-PLATFORMS = ["instagram", "facebook", "tiktok"]
+PLATFORMS = ["youtube", "instagram", "facebook", "tiktok"]
 PLATFORM_LABELS = {
     "youtube": "YouTube",
     "instagram": "Instagram",
@@ -107,6 +109,23 @@ def _pct_change(current, old):
     if current is None or old is None or old == 0:
         return None
     return round((current - old) / abs(old) * 100, 1)
+
+
+def _display_handle(handle, platform):
+    text = (handle or "").strip()
+    if not text:
+        return ""
+    if platform == "facebook":
+        m = re.search(r"profile\.php\?id=(\d+)", text)
+        if m:
+            return f"FB ID {m.group(1)}"
+        if "facebook.com/" in text:
+            slug = text.split("facebook.com/", 1)[1].rstrip("/").split("?")[0]
+            return slug or text
+    if text.startswith("http"):
+        cleaned = text.rstrip("/").split("/")[-1].split("?")[0]
+        return cleaned or text
+    return text.lstrip("@")
 
 
 def _time_ago(dt_str):
@@ -268,12 +287,31 @@ def get_dashboard_data(days=30, content_scope="video"):
                         for p in raw:
                             posts_list.append({
                                 "url": p.get("url", ""),
+                                "title": p.get("title", ""),
                                 "timestamp": p.get("timestamp"),
                                 "date": p.get("date", ""),
                                 "type": p.get("type", "post"),
                                 "is_video": p.get("type") in ("reel", "video"),
+                                "views": p.get("views"),
+                                "views_fmt": _fmt_number(p.get("views")),
                                 "likes": p.get("likes"),
                                 "likes_fmt": _fmt_number(p.get("likes")),
+                            })
+
+                    elif platform == "youtube":
+                        for p in raw:
+                            posts_list.append({
+                                "url": p.get("url", ""),
+                                "title": p.get("title", ""),
+                                "is_video": p.get("is_video", True),
+                                "is_short": p.get("is_short", False),
+                                "timestamp": p.get("timestamp"),
+                                "date": p.get("date", ""),
+                                "views": p.get("views"),
+                                "views_fmt": _fmt_number(p.get("views")),
+                                "likes": p.get("likes"),
+                                "likes_fmt": _fmt_number(p.get("likes")),
+                                "thumbnail": p.get("thumbnail", ""),
                             })
                 except Exception:
                     pass
@@ -286,6 +324,19 @@ def get_dashboard_data(days=30, content_scope="video"):
             ]
             if content_scope == "video":
                 posts_list = [post for post in posts_list if post.get("is_video")]
+
+            # Annotate each post with engagement_rate for color coding + max for relative bar
+            for post in posts_list:
+                views = post.get("views")
+                likes = post.get("likes")
+                if views and views > 0 and likes is not None:
+                    post["engagement_rate"] = round(likes / views * 100, 1)
+                else:
+                    post["engagement_rate"] = None
+            max_views = max((p.get("views") or 0) for p in posts_list) if posts_list else 0
+            for post in posts_list:
+                v = post.get("views") or 0
+                post["views_pct"] = round(v / max_views * 100) if max_views else 0
             period_views = [post["views"] for post in posts_list if post.get("views") is not None]
             period_likes = [post["likes"] for post in posts_list if post.get("likes") is not None]
             engagement_posts = [
@@ -306,6 +357,7 @@ def get_dashboard_data(days=30, content_scope="video"):
                 "platform_label": PLATFORM_LABELS.get(acc["platform"], acc["platform"]),
                 "platform_icon": PLATFORM_ICONS.get(acc["platform"], ""),
                 "handle": acc["handle"],
+                "display_handle": _display_handle(acc["handle"], acc["platform"]),
                 "has_login": acc["has_login"],
                 "last_update": last_update_raw[:16].replace("T", " ") if last_update_raw else None,
                 "time_ago": _time_ago(last_update_raw),
@@ -317,6 +369,7 @@ def get_dashboard_data(days=30, content_scope="video"):
                 "likes": build_metric("likes"),
                 "posts": build_metric("posts"),
                 "posts_list": posts_list,
+                "max_views": max_views,
                 "known_posts_count": len(all_posts_list),
                 "period": {
                     "count": len(posts_list),
@@ -332,11 +385,73 @@ def get_dashboard_data(days=30, content_scope="video"):
                 "last_post_date": (posts_list[0]["date"] or None) if posts_list else None,
             })
 
+        # Per-platform top reels for the boards (one section per platform).
+        platform_buckets = {}
+        for a in acc_data:
+            for p in a["posts_list"]:
+                if (p.get("views") or 0) <= 0:
+                    continue
+                bucket = platform_buckets.setdefault(a["platform"], {
+                    "platform": a["platform"],
+                    "platform_label": a["platform_label"],
+                    "platform_icon": a["platform_icon"],
+                    "handle": a.get("display_handle") or a["handle"],
+                    "posts": [],
+                })
+                bucket["posts"].append({
+                    "title": (p.get("title") or p.get("caption") or "(brez naslova)").strip(),
+                    "date": p.get("date") or "",
+                    "url": p.get("url"),
+                    "thumbnail": p.get("thumbnail"),
+                    "platform": a["platform"],
+                    "views": p.get("views"),
+                    "views_fmt": p.get("views_fmt"),
+                    "likes": p.get("likes"),
+                    "likes_fmt": p.get("likes_fmt"),
+                    "engagement_rate": p.get("engagement_rate"),
+                    "transcript": p.get("transcript"),
+                    "is_short": p.get("is_short", False),
+                    "is_video": p.get("is_video", False),
+                })
+        platform_boards = []
+        for platform_key in ("tiktok", "instagram", "youtube", "facebook"):
+            bucket = platform_buckets.get(platform_key)
+            if not bucket or not bucket["posts"]:
+                continue
+            bucket["posts"] = sorted(bucket["posts"], key=lambda p: p["views"], reverse=True)[:12]
+            platform_boards.append(bucket)
+
+        total_followers = sum((a["followers"]["value"] or 0) for a in acc_data)
+        total_period_views = sum(
+            int(a["period"]["views_fmt"].replace(".", "")) if a["period"]["views_fmt"] else 0
+            for a in acc_data
+        )
+        total_period_likes = sum(
+            int(a["period"]["likes_fmt"].replace(".", "")) if a["period"]["likes_fmt"] else 0
+            for a in acc_data
+        )
+        total_period_posts = sum(a["period"]["count"] for a in acc_data)
+        avg_engagement = (
+            round(total_period_likes / total_period_views * 100, 1)
+            if total_period_views else None
+        )
+
         result.append({
             "id": client["id"],
             "name": client["name"],
             "accounts": acc_data,
             "account_count": len(acc_data),
+            "platform_boards": platform_boards,
+            "summary": {
+                "total_followers_fmt": _fmt_number(total_followers) if total_followers else None,
+                "total_period_views_fmt": _fmt_number(total_period_views) if total_period_views else None,
+                "total_period_likes_fmt": _fmt_number(total_period_likes) if total_period_likes else None,
+                "total_period_posts": total_period_posts,
+                "avg_engagement_fmt": (
+                    str(avg_engagement).replace(".", ",") + " %"
+                    if avg_engagement is not None else None
+                ),
+            },
         })
 
     return result
@@ -444,6 +559,12 @@ def _transcript_clients_data():
                     completed_count += 1
                     account_completed_count += 1
                     client_completed_count += 1
+                views_n = post.get("views")
+                likes_n = post.get("likes")
+                engagement = (
+                    round(likes_n / views_n * 100, 1)
+                    if views_n and views_n > 0 and likes_n is not None else None
+                )
                 row = {
                     "account_id": account["id"],
                     "client_id": client["id"],
@@ -451,10 +572,12 @@ def _transcript_clients_data():
                     "handle": account["handle"],
                     "title": post.get("title") or "TikTok video",
                     "date": post.get("date"),
-                    "views": post.get("views"),
+                    "timestamp": post.get("timestamp"),
+                    "views": views_n,
                     "views_fmt": post.get("views_fmt"),
-                    "likes": post.get("likes"),
+                    "likes": likes_n,
                     "likes_fmt": post.get("likes_fmt"),
+                    "engagement_rate": engagement,
                     "video_url": post.get("url"),
                     "transcript": transcript,
                     "source_label": post.get("transcript_source") or linked.get("source_label"),
@@ -465,6 +588,7 @@ def _transcript_clients_data():
                 tiktok_rows.append(row)
                 client_rows.append(row)
             tiktok_accounts.append({
+                "id": account["id"],
                 "handle": account["handle"],
                 "video_count": account_video_count,
                 "completed_count": account_completed_count,
@@ -551,6 +675,23 @@ def export_client_transcripts(client_id):
             "Content-Disposition": f'attachment; filename="{_markdown_filename(client["name"])}"'
         },
     )
+
+
+@app.post("/transcripts/refresh")
+def refresh_transcripts():
+    if not config.TRANSCRIPTION_ENABLED:
+        return jsonify({"ok": False, "error": "Transkripcija je v tem okolju izklopljena."}), 400
+    data = request.get_json(silent=True) or {}
+    account_ids = data.get("account_ids")
+    if account_ids is not None and not isinstance(account_ids, list):
+        return jsonify({"ok": False, "error": "account_ids mora biti list."}), 400
+    if account_ids:
+        try:
+            account_ids = [int(x) for x in account_ids]
+        except (TypeError, ValueError):
+            return jsonify({"ok": False, "error": "Neveljaven account_id."}), 400
+    job_id = worker.enqueue_transcribe_tiktok(account_ids)
+    return jsonify({"ok": True, "job_id": job_id})
 
 
 @app.post("/transcripts/upload")
@@ -707,9 +848,74 @@ def refresh_ajax():
     else:
         return jsonify({"ok": False, "error": "Ni podanega ID-ja"})
 
-    errors = refresh_accounts(account_ids, discover_new=discover_new)
+    job_id = worker.enqueue_refresh(account_ids, discover_new=discover_new)
+    return jsonify({"ok": True, "job_id": job_id, "account_count": len(account_ids)})
 
-    return jsonify({"ok": True, "errors": errors})
+
+@app.route("/api/fb_cookies/status")
+def fb_cookies_status():
+    path = Path(config.FB_COOKIES_FILE)
+    if not path.exists():
+        return jsonify({
+            "exists": False,
+            "warning_days": config.FB_COOKIES_EXPIRY_WARNING_DAYS,
+        })
+    stat = path.stat()
+    modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc)
+    age_days = (datetime.now(timezone.utc) - modified).days
+    # Count Facebook cookie entries (rough — just non-comment, non-empty lines)
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        cookie_count = sum(
+            1 for line in lines
+            if line.strip() and not line.startswith("#") and "facebook.com" in line
+        )
+    except Exception:
+        cookie_count = 0
+    return jsonify({
+        "exists": True,
+        "modified": modified.replace(tzinfo=None).isoformat(),
+        "age_days": age_days,
+        "cookie_count": cookie_count,
+        "size_bytes": stat.st_size,
+        "warning_days": config.FB_COOKIES_EXPIRY_WARNING_DAYS,
+        "near_expiry": age_days >= config.FB_COOKIES_EXPIRY_WARNING_DAYS,
+    })
+
+
+@app.post("/setup/facebook_cookies")
+def upload_facebook_cookies():
+    file = request.files.get("cookies_file")
+    if not file:
+        return redirect(url_for("setup", error="Manjka datoteka."))
+    content = file.read()
+    if not content or b"facebook.com" not in content:
+        return redirect(url_for("setup", error="Datoteka ne vsebuje Facebook cookies."))
+    if len(content) > 256 * 1024:
+        return redirect(url_for("setup", error="Datoteka je prevelika (max 256 KB)."))
+    path = Path(config.FB_COOKIES_FILE)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return redirect(url_for("setup", notice="Facebook cookies shranjeni. Zaženi refresh."))
+
+
+@app.post("/setup/facebook_cookies/delete")
+def delete_facebook_cookies():
+    path = Path(config.FB_COOKIES_FILE)
+    if path.exists():
+        path.unlink()
+    return redirect(url_for("setup", notice="Facebook cookies odstranjeni."))
+
+
+@app.route("/api/jobs/active")
+def active_jobs():
+    active = db.get_active_jobs()
+    latest = db.get_latest_finished_job()
+    return jsonify({
+        "active": active,
+        "latest_finished": latest,
+        "now": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+    })
 
 
 @app.route("/setup")
@@ -717,6 +923,28 @@ def setup():
     clients = db.get_clients()
     yt_key = config.YOUTUBE_API_KEY or db.get_config("youtube_api_key", "")
     accounts_by_client = {c["id"]: db.get_accounts(c["id"]) for c in clients}
+
+    fb_cookies_path = Path(config.FB_COOKIES_FILE)
+    if fb_cookies_path.exists():
+        stat = fb_cookies_path.stat()
+        modified = datetime.fromtimestamp(stat.st_mtime, timezone.utc)
+        age_days = (datetime.now(timezone.utc) - modified).days
+        try:
+            lines = fb_cookies_path.read_text(encoding="utf-8").splitlines()
+            cookie_count = sum(1 for line in lines if line.strip() and not line.startswith("#") and "facebook.com" in line)
+        except Exception:
+            cookie_count = 0
+        fb_cookies_status = {
+            "exists": True,
+            "modified": modified.strftime("%d.%m.%Y %H:%M"),
+            "age_days": age_days,
+            "cookie_count": cookie_count,
+            "near_expiry": age_days >= config.FB_COOKIES_EXPIRY_WARNING_DAYS,
+            "warning_days": config.FB_COOKIES_EXPIRY_WARNING_DAYS,
+        }
+    else:
+        fb_cookies_status = {"exists": False, "warning_days": config.FB_COOKIES_EXPIRY_WARNING_DAYS}
+
     return render_template(
         "setup.html",
         clients=clients,
@@ -724,6 +952,9 @@ def setup():
         yt_key=yt_key,
         platforms=PLATFORMS,
         platform_labels=PLATFORM_LABELS,
+        fb_cookies=fb_cookies_status,
+        notice=request.args.get("notice"),
+        error=request.args.get("error"),
     )
 
 
@@ -808,6 +1039,45 @@ def img_proxy():
         return "", 502
 
 db.init_db()
+db.reset_stuck_jobs()
+
+
+_scheduler = None
+
+
+def _start_scheduler():
+    global _scheduler
+    if _scheduler is not None:
+        return _scheduler
+
+    interval_hours = int(db.get_config("auto_refresh_hours", "6") or "6")
+    if interval_hours <= 0:
+        return None
+
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    sched = BackgroundScheduler(timezone="UTC", daemon=True)
+    sched.add_job(
+        worker.enqueue_refresh_all,
+        trigger="interval",
+        hours=interval_hours,
+        id="auto_refresh_all",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2),
+    )
+    sched.start()
+    _scheduler = sched
+    return sched
+
+
+@app.before_request
+def _ensure_scheduler_started():
+    if _scheduler is None:
+        try:
+            _start_scheduler()
+        except Exception as exc:  # pragma: no cover — defensive
+            import sys
+            print(f"[scheduler] failed to start: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

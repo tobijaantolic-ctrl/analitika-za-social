@@ -72,6 +72,20 @@ def init_db():
             value TEXT
         );
 
+        CREATE TABLE IF NOT EXISTS jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            payload TEXT,
+            message TEXT,
+            error TEXT,
+            queued_at TEXT NOT NULL,
+            started_at TEXT,
+            finished_at TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+
         CREATE TABLE IF NOT EXISTS media_transcripts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             account_id INTEGER,
@@ -331,6 +345,81 @@ def delete_account(account_id):
     conn = get_db()
     conn.execute("DELETE FROM snapshots WHERE account_id=?", (account_id,))
     conn.execute("DELETE FROM accounts WHERE id=?", (account_id,))
+    conn.commit()
+    conn.close()
+
+
+def create_job(kind, payload=None):
+    conn = get_db()
+    queued_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+    cur = conn.execute(
+        "INSERT INTO jobs (kind, status, payload, queued_at) VALUES (?, 'queued', ?, ?)",
+        (kind, json.dumps(payload) if payload is not None else None, queued_at),
+    )
+    job_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return job_id
+
+
+def update_job(job_id, **fields):
+    if not fields:
+        return
+    cols = ", ".join(f"{k}=?" for k in fields)
+    values = list(fields.values()) + [job_id]
+    conn = get_db()
+    conn.execute(f"UPDATE jobs SET {cols} WHERE id=?", values)
+    conn.commit()
+    conn.close()
+
+
+def get_job(job_id):
+    conn = get_db()
+    row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_active_jobs():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM jobs WHERE status IN ('queued','running') ORDER BY id ASC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_latest_finished_job():
+    conn = get_db()
+    row = conn.execute(
+        "SELECT * FROM jobs WHERE status IN ('succeeded','failed') ORDER BY id DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def reset_stuck_jobs():
+    """Mark jobs from a previous process as failed (their worker thread is gone)."""
+    conn = get_db()
+    finished_at = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+    conn.execute(
+        """UPDATE jobs SET status='failed', error='proces je bil ponovno zagnan',
+                            finished_at=?
+           WHERE status IN ('queued','running')""",
+        (finished_at,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def prune_old_jobs(keep_last=50):
+    conn = get_db()
+    conn.execute(
+        """DELETE FROM jobs WHERE id NOT IN (
+               SELECT id FROM jobs ORDER BY id DESC LIMIT ?
+           )""",
+        (keep_last,),
+    )
     conn.commit()
     conn.close()
 

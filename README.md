@@ -52,6 +52,20 @@ docker compose up --build
 
 The compose setup stores runtime data in a Docker volume mounted at `/data`.
 
+## Public Deployment
+
+This is a Flask app, so GitHub Pages is not enough because Pages only serves
+static files. Use a server runtime such as Render.
+
+The repo includes `render.yaml` for a Render Blueprint deployment:
+
+1. Push `main` to GitHub.
+2. In Render, create a new Blueprint from this repository.
+3. Set `ADMIN_PASSWORD_HASH` when Render prompts for it.
+
+The Blueprint runs the Dockerfile, keeps auth enabled, stores SQLite/uploads on
+a persistent `/data` disk, and deploys automatically after commits to `main`.
+
 ## Deployment Notes
 
 The safest minimal online version is private/admin-only:

@@ -15,9 +15,6 @@
   {% if metric.value is not none %}
     <div class="metric-value-row">
       <span class="metric-value">{{ metric.fmt }}</span>
-      {% if metric.sparkline %}
-      <span class="sparkline" title="Trend (zadnjih 30 meritev)">{{ metric.sparkline|safe }}</span>
-      {% endif %}
     </div>
     <div class="metric-deltas">
       {% if metric.delta_7d_fmt %}
@@ -91,11 +88,75 @@
     </div>
   </div>
 
+  <div class="kpi-strip" aria-label="Skupni KPI za {{ client.name }}">
+    <div class="kpi-item">
+      <span class="kpi-label">Skupna dosega</span>
+      <span class="kpi-value">{{ client.summary.total_followers_fmt or '—' }}</span>
+    </div>
+    <div class="kpi-item">
+      <span class="kpi-label">Objav v obdobju</span>
+      <span class="kpi-value">{{ client.summary.total_period_posts or 0 }}</span>
+    </div>
+    <div class="kpi-item">
+      <span class="kpi-label">Ogledi v obdobju</span>
+      <span class="kpi-value">{{ client.summary.total_period_views_fmt or '—' }}</span>
+    </div>
+    <div class="kpi-item">
+      <span class="kpi-label">Povp. engagement</span>
+      <span class="kpi-value">{{ client.summary.avg_engagement_fmt or '—' }}</span>
+    </div>
+  </div>
+
   {% if not client.accounts %}
   <div class="empty-state">
     <p>Ni dodanih računov za to stranko. <a href="/setup">Pojdi na Setup.</a></p>
   </div>
   {% else %}
+
+  {% for board in client.platform_boards %}
+  <section class="top-reels-board platform-{{ board.platform }}">
+    <div class="board-header">
+      <h3><span class="board-platform-icon">{{ board.platform_icon }}</span> Top {{ board.posts|length }} · {{ board.platform_label }}</h3>
+      <span class="board-sub">{{ board.handle }} · po ogledih, klikni za odpiranje</span>
+    </div>
+    <div class="top-reels-grid">
+      {% for p in board.posts %}
+      {% set er = p.engagement_rate %}
+      <a href="{{ p.url }}" target="_blank" class="top-reel-card platform-{{ p.platform }}">
+        <div class="top-reel-rank">#{{ loop.index }}</div>
+        <div class="top-reel-thumb">
+          {% if p.thumbnail %}
+          {% if p.platform == 'youtube' %}
+          <img src="{{ p.thumbnail }}" alt="" loading="lazy" onerror="this.style.display='none'">
+          {% else %}
+          <img src="/img_proxy?url={{ p.thumbnail | urlencode }}" alt="" loading="lazy" onerror="this.style.display='none'">
+          {% endif %}
+          {% endif %}
+          {% if p.is_short %}<span class="top-reel-platform-pill">Short</span>{% endif %}
+        </div>
+        <div class="top-reel-meta">
+          <div class="top-reel-title" title="{{ p.title }}">{{ p.title }}</div>
+          <div class="top-reel-date">{{ p.date }}</div>
+          {% if p.transcript %}
+          <div class="top-reel-transcript" title="{{ p.transcript }}">{{ p.transcript[:140] }}{% if p.transcript|length > 140 %}…{% endif %}</div>
+          {% endif %}
+        </div>
+        <div class="top-reel-stats">
+          <span class="top-reel-views"><span class="stat-icon">▶</span> {{ p.views_fmt }}</span>
+          {% if p.likes is not none %}
+          <span class="top-reel-likes"><span class="stat-icon">♥</span> {{ p.likes_fmt }}</span>
+          {% endif %}
+          {% if er is not none %}
+          <span class="eng-badge {% if er >= 7 %}high{% elif er >= 4 %}good{% elif er >= 2 %}ok{% else %}low{% endif %}">
+            {{ ("%.1f" % er) | replace('.', ',') }}%
+          </span>
+          {% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
 
   <div class="accounts-grid">
     {% for acc in client.accounts %}
@@ -106,7 +167,7 @@
           <span class="platform-icon">{{ acc.platform_icon }}</span>
           {{ acc.platform_label }}
         </span>
-        <span class="handle">{{ acc.handle.lstrip('@') if not acc.handle.startswith('http') else acc.handle.split('/')[-2] if acc.handle.endswith('/') else acc.handle.split('/')[-1] }}</span>
+        <span class="handle">{{ acc.display_handle }}</span>
         <span class="source-pill">javni vir</span>
       </div>
 
@@ -182,6 +243,11 @@
             <div class="post-meta">
               <span class="post-date">{{ post.date }}</span>
               {% if post.caption %}<span class="post-caption">{{ post.caption }}</span>{% endif %}
+              {% if post.views is not none and post.views_pct %}
+              <div class="perf-bar-wrap" title="{{ post.views_pct }}% najboljšega v obdobju">
+                <div class="perf-bar" style="width: {{ post.views_pct }}%"></div>
+              </div>
+              {% endif %}
             </div>
             <div class="post-stats">
               {% if post.views is not none %}
@@ -189,6 +255,12 @@
               {% endif %}
               {% if post.likes is not none %}
               <span class="post-stat likes-stat" title="Všečki"><span class="stat-icon">♥</span> {{ post.likes_fmt }}</span>
+              {% endif %}
+              {% if post.engagement_rate is not none %}
+              {% set er = post.engagement_rate %}
+              <span class="eng-badge {% if er >= 7 %}high{% elif er >= 4 %}good{% elif er >= 2 %}ok{% else %}low{% endif %}">
+                {{ ("%.1f" % er) | replace('.', ',') }}%
+              </span>
               {% endif %}
             </div>
           </a>
@@ -212,6 +284,11 @@
               {% if post.transcript %}
               <span class="post-transcript" title="{{ post.transcript }}">Prepis: {{ post.transcript }}</span>
               {% endif %}
+              {% if post.views is not none and post.views_pct %}
+              <div class="perf-bar-wrap" title="{{ post.views_pct }}% najboljšega v obdobju">
+                <div class="perf-bar" style="width: {{ post.views_pct }}%"></div>
+              </div>
+              {% endif %}
             </div>
             <div class="post-stats">
               {% if post.views is not none %}
@@ -220,6 +297,54 @@
               {% if post.likes is not none %}
               <span class="post-stat likes-stat" title="Všečki"><span class="stat-icon">♥</span> {{ post.likes_fmt }}</span>
               {% endif %}
+              {% if post.engagement_rate is not none %}
+              {% set er = post.engagement_rate %}
+              <span class="eng-badge {% if er >= 7 %}high{% elif er >= 4 %}good{% elif er >= 2 %}ok{% else %}low{% endif %}">
+                {{ ("%.1f" % er) | replace('.', ',') }}%
+              </span>
+              {% endif %}
+            </div>
+          </a>
+          {% endfor %}
+
+          {% elif acc.platform == 'youtube' %}
+          {% for post in acc.posts_list %}
+          <a href="{{ post.url }}" target="_blank" class="post-row"
+             data-date="{{ post.timestamp or 0 }}" data-views="{{ post.views if post.views is not none else -1 }}"
+             data-likes="{{ post.likes if post.likes is not none else -1 }}">
+            <div class="post-thumb">
+              {% if post.thumbnail %}
+              <img src="{{ post.thumbnail }}" alt="" loading="lazy"
+                   onerror="this.style.display='none'">
+              {% endif %}
+              {% if post.is_short %}
+              <span class="post-type-badge reel">Short</span>
+              {% else %}
+              <span class="post-type-badge reel">Video</span>
+              {% endif %}
+            </div>
+            <div class="post-meta">
+              <span class="post-date">{{ post.date }}</span>
+              {% if post.title %}<span class="post-caption">{{ post.title }}</span>{% endif %}
+              {% if post.views is not none and post.views_pct %}
+              <div class="perf-bar-wrap" title="{{ post.views_pct }}% najboljšega v obdobju">
+                <div class="perf-bar" style="width: {{ post.views_pct }}%"></div>
+              </div>
+              {% endif %}
+            </div>
+            <div class="post-stats">
+              {% if post.views is not none %}
+              <span class="post-stat views-stat" title="Ogledi"><span class="stat-icon">▶</span> {{ post.views_fmt }}</span>
+              {% endif %}
+              {% if post.likes is not none %}
+              <span class="post-stat likes-stat" title="Všečki"><span class="stat-icon">♥</span> {{ post.likes_fmt }}</span>
+              {% endif %}
+              {% if post.engagement_rate is not none %}
+              {% set er = post.engagement_rate %}
+              <span class="eng-badge {% if er >= 7 %}high{% elif er >= 4 %}good{% elif er >= 2 %}ok{% else %}low{% endif %}">
+                {{ ("%.1f" % er) | replace('.', ',') }}%
+              </span>
+              {% endif %}
             </div>
           </a>
           {% endfor %}
@@ -227,7 +352,8 @@
           {% elif acc.platform == 'facebook' %}
           {% for post in acc.posts_list %}
           <a href="{{ post.url }}" target="_blank" class="post-row post-row--fb"
-             data-date="{{ post.timestamp or 0 }}" data-views="-1"
+             data-date="{{ post.timestamp or 0 }}"
+             data-views="{{ post.views if post.views is not none else -1 }}"
              data-likes="{{ post.likes if post.likes is not none else -1 }}">
             <div class="post-thumb">
               <span class="post-type-badge {% if post.type == 'reel' %}reel{% elif post.type == 'video' %}reel{% else %}photo{% endif %}">
@@ -236,13 +362,25 @@
             </div>
             <div class="post-meta">
               <span class="post-date">{{ post.date if post.date else '—' }}</span>
-              <span class="post-caption">{{ post.url.split('facebook.com/')[-1].split('?')[0][:60] }}</span>
+              <span class="post-caption">{{ post.title if post.title else post.url.split('facebook.com/')[-1].split('?')[0][:60] }}</span>
+              {% if post.views is not none and post.views_pct %}
+              <div class="perf-bar-wrap" title="{{ post.views_pct }}% najboljšega v obdobju">
+                <div class="perf-bar" style="width: {{ post.views_pct }}%"></div>
+              </div>
+              {% endif %}
             </div>
             <div class="post-stats">
+              {% if post.views is not none %}
+              <span class="post-stat views-stat" title="Ogledi"><span class="stat-icon">▶</span> {{ post.views_fmt }}</span>
+              {% endif %}
               {% if post.likes is not none %}
               <span class="post-stat likes-stat" title="Reakcije"><span class="stat-icon">♥</span> {{ post.likes_fmt }}</span>
-              {% else %}
-              <span class="post-stat unavailable-stat">Števec ni vrnjen</span>
+              {% endif %}
+              {% if post.engagement_rate is not none %}
+              {% set er = post.engagement_rate %}
+              <span class="eng-badge {% if er >= 7 %}high{% elif er >= 4 %}good{% elif er >= 2 %}ok{% else %}low{% endif %}">
+                {{ ("%.1f" % er) | replace('.', ',') }}%
+              </span>
               {% endif %}
             </div>
           </a>
@@ -287,6 +425,16 @@
     <div class="spinner"></div>
     <p id="spinner-msg">Osveževanje...</p>
   </div>
+</div>
+
+<div id="fb-cookies-banner" class="fb-cookies-banner" style="display:none">
+  <span class="fb-cookies-banner-msg"></span>
+  <a href="/setup" class="btn btn-xs">Posodobi cookies</a>
+</div>
+
+<div id="job-strip" class="job-strip" style="display:none">
+  <span class="job-strip-spinner" aria-hidden="true"></span>
+  <span class="job-strip-msg">Osveževanje teče v ozadju...</span>
 </div>
 
 <div id="toast" class="toast" style="display:none"></div>
@@ -338,7 +486,7 @@ function showToast(msg, type) {
 }
 
 async function doRefresh(payload, msg) {
-  showSpinner(msg);
+  showToast(msg + ' (osvežuje v ozadju)', 'info');
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
   try {
     const r = await fetch('/refresh_ajax', {
@@ -347,15 +495,59 @@ async function doRefresh(payload, msg) {
       body: JSON.stringify(payload)
     });
     const data = await r.json();
-    if (data.errors && data.errors.length) {
-      sessionStorage.setItem('pendingErrors', JSON.stringify(data.errors));
+    if (data.ok && data.job_id) {
+      startJobPolling(data.job_id);
     }
   } catch(e) {
-    sessionStorage.setItem('pendingErrors', JSON.stringify([String(e)]));
-  } finally {
-    hideSpinner();
-    window.location.reload();
+    showToast('⚠ Napaka: ' + String(e), 'error');
   }
+}
+
+let _jobPollTimer = null;
+let _lastSeenJobId = null;
+
+async function pollJobs() {
+  try {
+    const r = await fetch('/api/jobs/active');
+    const data = await r.json();
+    const strip = document.getElementById('job-strip');
+    if (data.active && data.active.length) {
+      const job = data.active[0];
+      strip.style.display = 'flex';
+      strip.querySelector('.job-strip-msg').textContent =
+        (job.status === 'running' ? '⟳ ' : '⌛ ') + (job.message || 'Job teče...');
+      strip.dataset.jobId = job.id;
+      return;
+    }
+    strip.style.display = 'none';
+    const finishedId = data.latest_finished?.id;
+    if (finishedId && finishedId !== _lastSeenJobId && _lastSeenJobId !== null) {
+      _lastSeenJobId = finishedId;
+      const job = data.latest_finished;
+      if (job.status === 'succeeded') {
+        showToast('✓ ' + (job.message || 'Osveženo.'), 'success');
+        setTimeout(() => window.location.reload(), 800);
+      } else {
+        showToast('⚠ ' + (job.message || 'Job ni uspel.'), 'error');
+      }
+      stopJobPolling();
+      return;
+    }
+    if (_lastSeenJobId === null && data.latest_finished) {
+      _lastSeenJobId = data.latest_finished.id;
+    }
+  } catch (_) {}
+}
+
+function startJobPolling(jobId) {
+  if (jobId) _lastSeenJobId = jobId - 1;  // ensure we detect this job finishing
+  if (_jobPollTimer) return;
+  pollJobs();
+  _jobPollTimer = setInterval(pollJobs, 2000);
+}
+
+function stopJobPolling() {
+  if (_jobPollTimer) { clearInterval(_jobPollTimer); _jobPollTimer = null; }
 }
 
 function refreshAll() { doRefresh({all: true}, 'Osveževanje vseh računov...'); }
@@ -376,7 +568,23 @@ window.addEventListener('DOMContentLoaded', () => {
       if (list && list.length) showToast('⚠ ' + list.slice(0, 2).join(' · '), 'error');
     } catch(_) {}
   }
+  // Detect any job already running (e.g. started by scheduler).
+  startJobPolling(null);
+  checkFbCookiesStatus();
 });
+
+async function checkFbCookiesStatus() {
+  try {
+    const r = await fetch('/api/fb_cookies/status');
+    const data = await r.json();
+    if (!data.exists) return;  // missing is fine — explicit choice
+    if (!data.near_expiry) return;
+    const banner = document.getElementById('fb-cookies-banner');
+    banner.querySelector('.fb-cookies-banner-msg').textContent =
+      `⚠ FB cookies so stari ${data.age_days} dni. Verjetno bodo kmalu pretekli — posodobi v Setup.`;
+    banner.style.display = 'flex';
+  } catch (_) {}
+}
 </script>
 
 </body>

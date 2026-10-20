@@ -16,9 +16,9 @@ O vsebini KKO odloča Tobija; radar samo predlaga.
 ## Postopek poročila
 1. Preberi `viri.md` in `gostje.md`. Raziskuj samo prek poti iz `viri.md`.
 2. Poročilo shrani v `radar/porocila/YYYY-MM-DD_krogN.md`.
-3. Struktura: (a) 5–8 tem tedna, vsaka z datumom, 2-stavčnim povzetkom in URL-jem;
-   (b) slovenski kot ne-slovenski viri ločeno; (c) 3–5 predlogov gostov (novi, glej `gostje.md`),
-   vsak z razlogom, aktualno povezavo in vprašanjem za uvod; (d) 5 idej za reel/TikTok za @zupnikm
+3. Struktura: (a) teme tedna (le tiste nad pragom kakovosti), vsaka z datumom, 2-stavčnim povzetkom in URL-jem;
+   (b) slovenski kot ne-slovenski viri ločeno; (c) predlogi gostov (samo kakovostni) (novi, glej `gostje.md`),
+   vsak z razlogom, aktualno povezavo in vprašanjem za uvod; (d) ideje za reel/TikTok za @zupnikm
    s hookom; (e) "Česa ne vemo" – odprta vprašanja in nepreverjeno.
 4. Dolžina: 600–900 besed.
 
